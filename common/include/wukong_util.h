@@ -47,6 +47,17 @@ enum SWIPE_DIRECTION { UP = 'u', DOWN = 'd', LEFT = 'l', RIGHT = 'r' };
 enum MOUSE_ACTION_ENUM { CLICK = 'c', DOUBLE_CLICK = 'b', DRAG = 'g', MOVE = 'm' };
 const int DIRECTION_LEN = 4;
 const int STEP = 2;
+
+/**
+ * @brief screen rectangle block region (absolute pixel coordinates)
+ */
+struct BlockRect {
+    int x1 = 0;
+    int y1 = 0;
+    int x2 = 0;
+    int y2 = 0;
+};
+
 class WuKongUtil : public DelayedSingleton<WuKongUtil> {
 public:
     /**
@@ -146,6 +157,43 @@ public:
      * @param blockList the block page list.
      */
     void GetBlockPageList(std::vector<std::string> &blockPageList);
+
+    /**
+     * @brief Set the Block Rect (-X x1,y1,x2,y2).
+     * @param optarg command string "x1,y1,x2,y2" (4 non-negative integers).
+     * @return Return ERR_OK on success, others on invalid format.
+     */
+    ErrCode SetBlockRectList(const std::string &optarg);
+
+    /**
+     * @brief Get the Block Rect List.
+     * @return const reference to blockRectList
+     */
+    const std::vector<BlockRect>& GetBlockRectList();
+
+    /**
+     * @brief Whether a block rect is configured.
+     * @return true if block rect is configured.
+     */
+    bool HasBlockRect();
+
+    /**
+     * @brief Compute a random touch point that avoids the block rect (AC-1.4~1.6).
+     * @param screenW screen width.
+     * @param screenH screen height.
+     * @param block block rect (clamped internally to screen).
+     * @param touchX output touch x.
+     * @param touchY output touch y.
+     * @return ERR_OK with touchX/touchY set; ERR_INVALID_VALUE if available area is 0
+     *         (block covers whole screen, skip this round per AC-1.6).
+     */
+    static ErrCode CalcBlockAvoidPoint(int screenW, int screenH, const BlockRect &block,
+                                       int &touchX, int &touchY);
+
+    /**
+     * @brief Clear the block rect list (test isolation / reset).
+     */
+    void ClearBlockRect();
 
     /**
      * @brief get the bundlelist and ability list.
@@ -476,6 +524,7 @@ private:
     std::vector<std::string> blockList_ = {"com.ohos.devicemanagerui", "com.ohos.screenlock",
                                            "com.ohos.permissionmanager"};
     std::vector<std::string> blockPageList_ = {"pages/system"};
+    std::vector<BlockRect> blockRectList_;
     std::vector<std::string> blockAbilityList_;
     std::vector<std::string> unLaunchedBundleList_;
     std::vector<std::string> unLaunchedAbilityList_;

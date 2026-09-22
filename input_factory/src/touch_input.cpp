@@ -61,8 +61,22 @@ ErrCode TouchInput::RandomInput()
     if (result != OHOS::ERR_OK) {
         return result;
     }
-    int touchX = rand() % screenWidth;
-    int touchY = rand() % screenHeight;
+    int touchX;
+    int touchY;
+    auto util = WuKongUtil::GetInstance();
+    if (util->HasBlockRect()) {
+        const auto &blockList = util->GetBlockRectList();
+        const BlockRect &block = blockList[0];
+        ErrCode avoidRet = WuKongUtil::CalcBlockAvoidPoint(screenWidth, screenHeight, block, touchX, touchY);
+        if (avoidRet != OHOS::ERR_OK) {
+            // Block covers whole screen; skip this round, no touch (AC-1.6).
+            INFO_LOG("TouchInput: available area is 0 (block covers screen), skip this round.");
+            return OHOS::ERR_OK;
+        }
+    } else {
+        touchX = rand() % screenWidth;
+        touchY = rand() % screenHeight;
+    }
     auto multiinput = MultimodeManager::GetInstance();
     result = multiinput->PointerInput(touchX, touchY, MMI::PointerEvent::SOURCE_TYPE_TOUCHSCREEN,
                                       MMI::PointerEvent::POINTER_ACTION_DOWN);

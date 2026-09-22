@@ -52,6 +52,7 @@ private:
     ErrCode CheckArgumentOptionOfT();
     ErrCode CheckArgumentOptionOfF();
     ErrCode CheckArgumentOptionOfD();
+    ErrCode CheckArgumentOptionOfX();
     /**
      * @brief check if the '-c' and 'T' is exist at the same time
      * @brief check if the '-e' and '-E' is legal
