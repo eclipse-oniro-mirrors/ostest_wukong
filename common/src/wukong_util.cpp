@@ -16,9 +16,11 @@
 #include "wukong_util.h"
 
 #include <climits>
+#include <cstdlib>
 #include <dirent.h>
 #include <fstream>
 #include <iostream>
+#include <utility>
 #include <memory.h>
 #include <sstream>
 #include <sys/stat.h>
@@ -57,6 +59,11 @@ const uint32_t BLANK_THR = 30;
 const uint32_t WHITE_THR = 225;
 int g_bwCount = 0;
 constexpr int32_t TIME_CONVERSION_UNIT { 1000 };
+constexpr int BLOCK_RECT_X1_INDEX = 0;
+constexpr int BLOCK_RECT_Y1_INDEX = 1;
+constexpr int BLOCK_RECT_X2_INDEX = 2;
+constexpr int BLOCK_RECT_Y2_INDEX = 3;
+constexpr int MAX_SUB_RECT_COUNT = 4;
 
 bool g_isBwScreen(std::shared_ptr<Media::PixelMap> pixelMap)
 {
@@ -135,6 +142,62 @@ bool TakeWuKongScreenCap(const std::string &wkScreenPath, const bool checkBWScre
     png_destroy_write_struct(&pngStruct, &pngInfo);
     (void)fclose(fp);
     return true;
+}
+
+struct BlockSubRect {
+    int xmin;
+    int ymin;
+    int xmax;
+    int ymax;
+};
+
+void DecomposeAvailableArea(int screenW, int screenH, const BlockRect &block,
+                            std::vector<BlockSubRect> &subs)
+{
+    subs.clear();
+    if (block.y1 > 0) {
+        subs.push_back({0, 0, screenW, block.y1});
+    }
+    if (block.y2 < screenH) {
+        subs.push_back({0, block.y2, screenW, screenH});
+    }
+    if (block.x1 > 0 && block.y2 > block.y1) {
+        subs.push_back({0, block.y1, block.x1, block.y2});
+    }
+    if (block.x2 < screenW && block.y2 > block.y1) {
+        subs.push_back({block.x2, block.y1, screenW, block.y2});
+    }
+}
+
+const BlockSubRect *WeightedPickSubRect(const std::vector<BlockSubRect> &subs)
+{
+    if (subs.empty()) {
+        return nullptr;
+    }
+    int64_t areas[MAX_SUB_RECT_COUNT] = {0};
+    int64_t totalArea = 0;
+    size_t count = std::min(subs.size(), static_cast<size_t>(MAX_SUB_RECT_COUNT));
+    for (size_t i = 0; i < count; ++i) {
+        int64_t w = static_cast<int64_t>(subs[i].xmax) - subs[i].xmin;
+        int64_t h = static_cast<int64_t>(subs[i].ymax) - subs[i].ymin;
+        areas[i] = w * h;
+        totalArea += areas[i];
+    }
+    if (totalArea <= 0) {
+        return nullptr;
+    }
+    if (totalArea > static_cast<int64_t>(UINT_MAX)) {
+        totalArea = static_cast<int64_t>(UINT_MAX);
+    }
+    unsigned int pick = WuKongUtil::GetInstance()->Generate(static_cast<unsigned int>(totalArea));
+    int64_t acc = 0;
+    for (size_t i = 0; i < count; ++i) {
+        acc += areas[i];
+        if (acc > static_cast<int64_t>(pick)) {
+            return &subs[i];
+        }
+    }
+    return &subs[0];
 }
 }  // namespace
 using namespace std;
@@ -383,6 +446,90 @@ ErrCode WuKongUtil::SetBlockPageList(const std::string &optarg)
         result = OHOS::ERR_OK;
     }
     return result;
+}
+
+ErrCode WuKongUtil::SetBlockRectList(const std::string &optarg)
+{
+    static const std::regex pattern(R"(^\d+,\d+,\d+,\d+$)");
+    if (!std::regex_match(optarg, pattern)) {
+        ERROR_LOG("Setting -X must follow format x1,y1,x2,y2 with non-negative integers (e.g. 100,200,300,400)");
+        return OHOS::ERR_INVALID_VALUE;
+    }
+
+    std::vector<int> coords;
+    std::stringstream ss(optarg);
+    std::string token;
+    while (std::getline(ss, token, ',')) {
+        char *endPtr = nullptr;
+        int64_t val = std::strtoll(token.c_str(), &endPtr, 10);
+        if (endPtr == token.c_str() || *endPtr != '\0' || val < 0 || val > INT_MAX) {
+            ERROR_LOG("Setting -X coordinate value out of range");
+            return OHOS::ERR_INVALID_VALUE;
+        }
+        coords.push_back(static_cast<int>(val));
+    }
+
+    BlockRect rect;
+    rect.x1 = coords[BLOCK_RECT_X1_INDEX];
+    rect.y1 = coords[BLOCK_RECT_Y1_INDEX];
+    rect.x2 = coords[BLOCK_RECT_X2_INDEX];
+    rect.y2 = coords[BLOCK_RECT_Y2_INDEX];
+    blockRectList_.clear();
+    blockRectList_.push_back(rect);
+    INFO_LOG_STR("Set block rect: (%d,%d,%d,%d)", rect.x1, rect.y1, rect.x2, rect.y2);
+    return OHOS::ERR_OK;
+}
+
+const std::vector<BlockRect>& WuKongUtil::GetBlockRectList()
+{
+    return blockRectList_;
+}
+
+bool WuKongUtil::HasBlockRect()
+{
+    return !blockRectList_.empty();
+}
+
+
+ErrCode WuKongUtil::CalcBlockAvoidPoint(int screenW, int screenH, const BlockRect &block,
+                                        int &touchX, int &touchY)
+{
+    if (screenW <= 0 || screenH <= 0) {
+        return OHOS::ERR_INVALID_VALUE;
+    }
+    BlockRect clamped;
+    clamped.x1 = std::max(0, std::min(block.x1, screenW));
+    clamped.x2 = std::max(0, std::min(block.x2, screenW));
+    clamped.y1 = std::max(0, std::min(block.y1, screenH));
+    clamped.y2 = std::max(0, std::min(block.y2, screenH));
+    if (clamped.x1 > clamped.x2) {
+        std::swap(clamped.x1, clamped.x2);
+    }
+    if (clamped.y1 > clamped.y2) {
+        std::swap(clamped.y1, clamped.y2);
+    }
+
+    std::vector<BlockSubRect> subs;
+    DecomposeAvailableArea(screenW, screenH, clamped, subs);
+
+    const BlockSubRect *chosen = WeightedPickSubRect(subs);
+    if (chosen == nullptr) {
+        return OHOS::ERR_INVALID_VALUE;
+    }
+    auto util = WuKongUtil::GetInstance();
+    int subW = chosen->xmax - chosen->xmin;
+    int subH = chosen->ymax - chosen->ymin;
+    if (subW <= 0 || subH <= 0) {
+        return OHOS::ERR_INVALID_VALUE;
+    }
+    touchX = chosen->xmin + static_cast<int>(util->Generate(static_cast<unsigned int>(subW)));
+    touchY = chosen->ymin + static_cast<int>(util->Generate(static_cast<unsigned int>(subH)));
+    return OHOS::ERR_OK;
+}
+
+void WuKongUtil::ClearBlockRect()
+{
+    blockRectList_.clear();
 }
 
 ErrCode WuKongUtil::SetComponentUri(const std::string &optarg)

@@ -49,7 +49,10 @@ public:
     static void SetUpTestCase() {}
     static void TearDownTestCase() {}
 
-    void SetUp() {}
+    void SetUp()
+    {
+        WuKongUtil::GetInstance()->ClearBlockRect();
+    }
     void TearDown() {}
 };
 
@@ -86,6 +89,149 @@ HWTEST_F(WuKongTest, WuKongFuncTest1, TestSize.Level1)
     auto ret = ExecCmd(cmd, result);
     EXPECT_EQ(ret, true);
     EXPECT_EQ(result.size() > 0, true);
+}
+
+
+/**
+ * @tc.name: BlockRectStoreTest
+ * @tc.desc: AC-1.1 legal -X x1,y1,x2,y2 accepted and stored in WuKongUtil
+ * @tc.type: FUNC
+ */
+HWTEST_F(WuKongTest, BlockRectStoreTest, TestSize.Level0)
+{
+    auto util = WuKongUtil::GetInstance();
+    ASSERT_NE(util, nullptr);
+    auto ret = util->SetBlockRectList("1,2,3,4");
+    EXPECT_EQ(ret, OHOS::ERR_OK);
+    const auto &list = util->GetBlockRectList();
+    ASSERT_FALSE(list.empty());
+    EXPECT_EQ(list[0].x1, 1);
+    EXPECT_EQ(list[0].y1, 2);
+    EXPECT_EQ(list[0].x2, 3);
+    EXPECT_EQ(list[0].y2, 4);
+    EXPECT_EQ(util->HasBlockRect(), true);
+}
+
+/**
+ * @tc.name: BlockRectIllegalFormatTest
+ * @tc.desc: AC-1.2 illegal -X formats rejected with ERR_INVALID_VALUE
+ * @tc.type: FUNC
+ */
+HWTEST_F(WuKongTest, BlockRectIllegalFormatTest, TestSize.Level0)
+{
+    auto util = WuKongUtil::GetInstance();
+    ASSERT_NE(util, nullptr);
+    EXPECT_EQ(util->SetBlockRectList("1,2,3"), OHOS::ERR_INVALID_VALUE);            // 3 segments
+    EXPECT_EQ(util->SetBlockRectList("1,2,3,4,5"), OHOS::ERR_INVALID_VALUE);         // 5 segments
+    EXPECT_EQ(util->SetBlockRectList("a,b,c,d"), OHOS::ERR_INVALID_VALUE);          // non-integer
+    EXPECT_EQ(util->SetBlockRectList("-1,2,3,4"), OHOS::ERR_INVALID_VALUE);          // negative
+    EXPECT_EQ(util->SetBlockRectList("1.5,2,3,4"), OHOS::ERR_INVALID_VALUE);        // decimal
+    EXPECT_EQ(util->SetBlockRectList("99999999999,2,3,4"), OHOS::ERR_INVALID_VALUE); // overflow
+}
+
+/**
+ * @tc.name: BlockRectClearTest
+ * @tc.desc: ClearBlockRect resets block state (test isolation)
+ * @tc.type: FUNC
+ */
+HWTEST_F(WuKongTest, BlockRectClearTest, TestSize.Level0)
+{
+    auto util = WuKongUtil::GetInstance();
+    ASSERT_NE(util, nullptr);
+    EXPECT_EQ(util->SetBlockRectList("1,2,3,4"), OHOS::ERR_OK);
+    EXPECT_EQ(util->HasBlockRect(), true);
+    util->ClearBlockRect();
+    EXPECT_EQ(util->HasBlockRect(), false);
+    EXPECT_TRUE(util->GetBlockRectList().empty());
+}
+
+/**
+ * @tc.name: BlockRectCalcAvoidPointTest
+ * @tc.desc: AC-1.4 random touch point strictly avoids the block rect (interception 100%)
+ * @tc.type: FUNC
+ */
+HWTEST_F(WuKongTest, BlockRectCalcAvoidPointTest, TestSize.Level0)
+{
+    const int screenW = 1000;
+    const int screenH = 1000;
+    BlockRect block;
+    block.x1 = 100;
+    block.y1 = 200;
+    block.x2 = 300;
+    block.y2 = 400;
+    for (int i = 0; i < 500; ++i) {
+        int x = -1;
+        int y = -1;
+        auto ret = WuKongUtil::CalcBlockAvoidPoint(screenW, screenH, block, x, y);
+        EXPECT_EQ(ret, OHOS::ERR_OK);
+        bool inBlock = (x >= block.x1 && x < block.x2 && y >= block.y1 && y < block.y2);
+        EXPECT_FALSE(inBlock);
+        EXPECT_GE(x, 0);
+        EXPECT_LT(x, screenW);
+        EXPECT_GE(y, 0);
+        EXPECT_LT(y, screenH);
+    }
+}
+
+/**
+ * @tc.name: BlockRectClampTest
+ * @tc.desc: AC-1.5 block beyond screen is clamped to screen boundary
+ * @tc.type: FUNC
+ */
+HWTEST_F(WuKongTest, BlockRectClampTest, TestSize.Level0)
+{
+    const int screenW = 1000;
+    const int screenH = 1000;
+    BlockRect block;
+    block.x1 = 100;
+    block.y1 = 200;
+    block.x2 = 2000;
+    block.y2 = 2000;
+    for (int i = 0; i < 200; ++i) {
+        int x = -1;
+        int y = -1;
+        auto ret = WuKongUtil::CalcBlockAvoidPoint(screenW, screenH, block, x, y);
+        EXPECT_EQ(ret, OHOS::ERR_OK);
+        EXPECT_GE(x, 0);
+        EXPECT_LT(x, screenW);
+        EXPECT_GE(y, 0);
+        EXPECT_LT(y, screenH);
+    }
+}
+
+/**
+ * @tc.name: BlockRectFullCoverSkipTest
+ * @tc.desc: AC-1.6 block covers whole screen, available area 0, skip this round
+ * @tc.type: FUNC
+ */
+HWTEST_F(WuKongTest, BlockRectFullCoverSkipTest, TestSize.Level0)
+{
+    const int screenW = 1000;
+    const int screenH = 1000;
+    BlockRect block;
+    block.x1 = 0;
+    block.y1 = 0;
+    block.x2 = screenW;
+    block.y2 = screenH;
+    int x = -1;
+    int y = -1;
+    auto ret = WuKongUtil::CalcBlockAvoidPoint(screenW, screenH, block, x, y);
+    EXPECT_EQ(ret, OHOS::ERR_INVALID_VALUE);
+}
+
+/**
+ * @tc.name: BlockRectTouchDepTest
+ * @tc.desc: AC-1.3 -X without -t is rejected (binding, no ordering restriction), test must not start
+ * @tc.type: FUNC
+ */
+HWTEST_F(WuKongTest, BlockRectTouchDepTest, TestSize.Level1)
+{
+    std::string cmd = "wukong exec -X 100,200,300,400 -T 1";
+    std::string result = "";
+    auto ret = ExecCmd(cmd, result);
+    EXPECT_EQ(ret, true);
+    std::string::size_type pos = result.find("all test Finished");
+    EXPECT_EQ(pos == result.npos, true);
 }
 
 

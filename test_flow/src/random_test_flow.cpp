@@ -65,9 +65,10 @@ const std::string RANDOM_TEST_HELP_MSG =
     "   -l, --idle                 set percent of watch idle event \n"
     "   -j, --keypress             set percent of watch key press event \n"
     "   -F, --float                set percent of float and split event \n"
-    "   -W, --browser              set percent of browser operation event \n";
+    "   -W, --browser              set percent of browser operation event \n"
+    "   -X, --blockRect            set screen block rectangle x1,y1,x2,y2 (e.g. 100,200,300,400) \n";
 
-const std::string SHORT_OPTIONS = "a:b:c:d:e:E:hIBoi:k:p:s:t:T:H:m:S:C:r:Y:y:U:x:K:P:f:D:w:g:l:j:F:q:W:";
+const std::string SHORT_OPTIONS = "a:b:c:d:e:E:hIBoi:k:p:s:t:T:H:m:S:C:r:Y:y:U:x:K:P:f:D:w:g:l:j:F:q:W:X:";
 const struct option LONG_OPTIONS[] = {
     {"help", no_argument, nullptr, 'h'},             // help
     {"seed", required_argument, nullptr, 's'},       // test seed
@@ -104,7 +105,8 @@ const struct option LONG_OPTIONS[] = {
     {"keypress", required_argument, nullptr, 'j'},
     {"float", required_argument, nullptr, 'F'},
     {"collapse", required_argument, nullptr, 'q'},
-    {"browser", required_argument, nullptr, 'W'}
+    {"browser", required_argument, nullptr, 'W'},
+    {"blockRect", required_argument, nullptr, 'X'}
 };
 
 /**
@@ -177,7 +179,7 @@ bool g_commandUITEST = false;
 // 需要带百分比参数的命令参数合集
 const std::string NEED_PERCENT_OPTIONS = "amkrtwgljCHKPSFqW";
 // 需要后面跟配置的命令参数合集
-const std::string NEED_ARG_OPTIONS = "abcdefgijklmprstwxyCDEHSTUYFqW";
+const std::string NEED_ARG_OPTIONS = "abcdefgijklmprstwxyCDEHSTUYFqWX";
 const std::string ONLY_WATCH_SUPPORT_ARGS = "wglj";
 }  // namespace
 using namespace std;
@@ -251,6 +253,12 @@ ErrCode RandomTestFlow::InitEventPercent()
 
 ErrCode RandomTestFlow::EnvInit()
 {
+    // -t/-X binding check: -X requires -t, no ordering restriction (AC-1.3).
+    if (WuKongUtil::GetInstance()->HasBlockRect() && inputPercent_[INPUTTYPE_TOUCHINPUT] <= 0) {
+        ERROR_LOG("invalid param: -t must be configured with -X");
+        return OHOS::ERR_INVALID_VALUE;
+    }
+
     // init event list percent.
     ErrCode result = InitEventPercent();
     if (result != OHOS::ERR_OK) {
@@ -359,7 +367,7 @@ ErrCode RandomTestFlow::SetBlackWhiteSheet(const int option)
 ErrCode RandomTestFlow::SetRunningParam(const int option)
 {
     ErrCode result = OHOS::ERR_OK;
-    if (option == 'c' || option == 'T' || option == 'f' || option == 'D') {
+    if (option == 'c' || option == 'T' || option == 'f' || option == 'D' || option == 'X') {
         result = CheckArgument(option);
     } else if (option == 'i') {
         std::regex pattern("[0-9]+");
@@ -617,6 +625,10 @@ ErrCode RandomTestFlow::CheckArgument(const int option)
             result = CheckArgumentOptionOfD();
             break;
         }
+        case 'X': {
+            result = CheckArgumentOptionOfX();
+            break;
+        }
         default: {
             result = OHOS::ERR_INVALID_VALUE;
             break;
@@ -802,6 +814,13 @@ bool RandomTestFlow::CheckBlockAbility()
         inputFlag = false;
     }
     return inputFlag;
+}
+
+ErrCode RandomTestFlow::CheckArgumentOptionOfX()
+{
+    // Format validation + storage via WuKongUtil (AC-1.1, AC-1.2).
+    // -t/-X binding check deferred to EnvInit (AC-1.3, no ordering restriction).
+    return WuKongUtil::GetInstance()->SetBlockRectList(optarg);
 }
 }  // namespace WuKong
 }  // namespace OHOS
